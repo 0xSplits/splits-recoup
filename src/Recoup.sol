@@ -26,6 +26,14 @@ contract Recoup {
     error InvalidRecoup__SingleAddressPercentAllocation(uint256 index, uint32 percentAllocation);
 
     /// -----------------------------------------------------------------------
+    /// events
+    /// -----------------------------------------------------------------------
+
+    /// Emitted after a new recoup is deployed
+    /// @param waterfallModule Address of newly created WaterfallModule
+    event CreateRecoup(address waterfallModule);
+
+    /// -----------------------------------------------------------------------
     /// storage
     /// -----------------------------------------------------------------------
 
