@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.17;
 
-import {ERC20} from "solmate/tokens/ERC20.sol";
 import {ISplitMain} from "./interfaces/ISplitMain.sol";
 import {IWaterfallModuleFactory} from "./interfaces/IWaterfallModuleFactory.sol";
 import {IWaterfallModule} from "./interfaces/IWaterfallModule.sol";
