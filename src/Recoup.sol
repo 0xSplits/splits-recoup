@@ -19,7 +19,7 @@ contract Recoup {
     /// Invalid number of accounts for a recoup tranche; must be at least one
     error InvalidRecoup__TooFewAccounts(uint256 index);
 
-    error InvalidRecoup__AccountsAndPercentAllocationsMismatch(uint256 index);
+    error InvalidRecoup__TrancheAccountsAndPercentAllocationsMismatch(uint256 index);
 
     /// Invalid percent allocation for a single address; must equal PERCENTAGE_SCALE
     error InvalidRecoup__SingleAddressPercentAllocation(uint256 index, uint32 percentAllocation);
@@ -70,8 +70,9 @@ contract Recoup {
     /// @dev A single address in a recipient array with a matching single 1e6 value in a percentAllocations array means that tranche will be a single address and not a split
     function createRecoup(
         address token,
-        address nonWaterfallRecipient, // Worth having this? Don't think we expose it in our ui currently, so can't see us adding it for this (but maybe good to have as an option for future ui updates)
-        uint32 distributorFee, // Worth even having this? Should it always be 0? If the waterfall has no distribution incentive, seems like minimal gain to have it on the splits
+        address nonWaterfallRecipient, // TODO: Worth having this? Don't think we expose it in our ui currently, so can't see us adding it for this (but maybe good to have as an option for future ui updates)
+        uint32 distributorFee, // TODO: Worth even having this? Should it always be 0? If the waterfall has no distribution incentive, seems like minimal gain to have it on the splits
+        // TODO: Should we support controller here for the splits? Allow different controllers for each split?
         address[][] calldata recipients,
         uint32[][] calldata percentAllocations,
         uint256[] calldata thresholds
@@ -80,7 +81,8 @@ contract Recoup {
 
         uint256 recipientsLength = recipients.length;
 
-        // ensure recipients array and percent allocations array match in length
+        // Ensure recipients array and percent allocations array match in length.
+        // Thresholds array gets validated in create waterfall call
         if (recipientsLength != percentAllocations.length) {
             revert InvalidRecoup__RecipientsAndPercentAllocationsMismatch();
         }
@@ -90,11 +92,11 @@ contract Recoup {
             // TODO: better way to setup these checks?
 
             uint256 recipientsIndexLength = recipients[i].length;
-            if (recipientsIndexLength != percentAllocations[i].length) {
-                revert InvalidRecoup__AccountsAndPercentAllocationsMismatch(i);
-            }
             if (recipientsIndexLength == 0) {
                 revert InvalidRecoup__TooFewAccounts(i);
+            }
+            if (recipientsIndexLength != percentAllocations[i].length) {
+                revert InvalidRecoup__TrancheAccountsAndPercentAllocationsMismatch(i);
             }
             if (recipientsIndexLength == 1 && percentAllocations[i][0] != PERCENTAGE_SCALE) {
                 revert InvalidRecoup__SingleAddressPercentAllocation(i, percentAllocations[i][0]);
@@ -138,7 +140,7 @@ contract Recoup {
             thresholds: thresholds
         });
 
-        // TODO: do i need the created split addresses here too? Technically subgraph can look those up from the waterfall I think.
+        // TODO: should i include the created split addresses here too? Technically subgraph can look those up from the waterfall I think.
         emit CreateRecoup(address(wm));
     }
 }

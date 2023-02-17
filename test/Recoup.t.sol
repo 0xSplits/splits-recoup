@@ -87,7 +87,9 @@ contract RecoupTest is Test {
     function testCannot_createWithMismatchedSplitDataLengths() public {
         recipients[0] = new address[](1);
         recipients[0][0] = makeAddr("recipient");
-        vm.expectRevert(abi.encodeWithSelector(Recoup.InvalidRecoup__AccountsAndPercentAllocationsMismatch.selector, 0));
+        vm.expectRevert(
+            abi.encodeWithSelector(Recoup.InvalidRecoup__TrancheAccountsAndPercentAllocationsMismatch.selector, 0)
+        );
         recoup.createRecoup(
             address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
         );
