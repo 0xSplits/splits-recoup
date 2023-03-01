@@ -13,16 +13,31 @@ contract Recoup {
     /// errors
     /// -----------------------------------------------------------------------
 
-    /// Invalid recipient & percent allocation lengths; must be equal
-    error InvalidRecoup__RecipientsAndPercentAllocationsMismatch();
+    /// Invalid non waterfall recipient tranche index, cannot be larger than tranches length
+    error InvalidRecoup__NonWaterfallRecipientTrancheIndexTooLarge();
+
+    /// Invalid non waterfall recipient, address and tranche both set
+    error InvalidRecoup__NonWaterfallRecipientSetTwice();
 
     /// Invalid number of accounts for a recoup tranche; must be at least one
     error InvalidRecoup__TooFewAccounts(uint256 index);
 
+    /// Invalid recipient and percent allocation lengths for a tranche; must be equal
     error InvalidRecoup__TrancheAccountsAndPercentAllocationsMismatch(uint256 index);
 
     /// Invalid percent allocation for a single address; must equal PERCENTAGE_SCALE
     error InvalidRecoup__SingleAddressPercentAllocation(uint256 index, uint32 percentAllocation);
+
+    /// -----------------------------------------------------------------------
+    /// structs
+    /// -----------------------------------------------------------------------
+
+    struct Tranche {
+        address[] recipients;
+        uint32[] percentAllocations;
+        address controller;
+        uint32 distributorFee;
+    }
 
     /// -----------------------------------------------------------------------
     /// events
@@ -61,45 +76,46 @@ contract Recoup {
 
     /// Creates a waterfall module and possibly multiple splits given the input parameters
     /// @param token Address of ERC20 to waterfall (0x0 used for ETH)
-    /// @param nonWaterfallRecipient Address to recover non-waterfall tokens to
-    /// @param distributorFee Fee paid out to the distributor of each split
-    /// @param recipients Addresses to optionally create splits for / waterfall payments to
-    /// @param percentAllocations Allocations for each address within a waterfall tranche
+    /// @param nonWaterfallRecipientAddress Address to recover non-waterfall tokens to
+    /// @param nonWaterfallRecipientTrancheIndex Tranche number to recover non-waterfall tokens to
+    /// @param tranches Split data for each tranche. A single address will just be used (no split created)
     /// @param thresholds Absolute payment thresholds for waterfall tranches
     /// (last recipient has no threshold & receives all residual flows)
-    /// @dev A single address in a recipient array with a matching single 1e6 value in a percentAllocations array means that tranche will be a single address and not a split
+    /// @dev A single address in a split recipient array with a matching single 1e6 value in the percentAllocations
+    /// array means that tranche will be a single address and not a split. The nonWaterfallRecipient
+    /// will be set to the passed in address, except for when that is address(0) and the
+    /// non waterfall tranche is set. In that case the nonWaterfallRecipient will be set to the address
+    /// at that tranche index.
     function createRecoup(
         address token,
-        address nonWaterfallRecipient, // TODO: Worth having this? Don't think we expose it in our ui currently, so can't see us adding it for this (but maybe good to have as an option for future ui updates)
-        uint32 distributorFee, // TODO: Worth even having this? Should it always be 0? If the waterfall has no distribution incentive, seems like minimal gain to have it on the splits
-        // TODO: Should we support controller here for the splits? Allow different controllers for each split?
-        address[][] calldata recipients,
-        uint32[][] calldata percentAllocations,
+        address nonWaterfallRecipientAddress,
+        uint256 nonWaterfallRecipientTrancheIndex, // Must be set to tranches.length if not being used
+        Tranche[] calldata tranches,
         uint256[] calldata thresholds
     ) external {
         /// checks
 
-        uint256 recipientsLength = recipients.length;
+        uint256 tranchesLength = tranches.length;
 
-        // Ensure recipients array and percent allocations array match in length.
-        // Thresholds array gets validated in create waterfall call
-        if (recipientsLength != percentAllocations.length) {
-            revert InvalidRecoup__RecipientsAndPercentAllocationsMismatch();
+        if (nonWaterfallRecipientTrancheIndex > tranchesLength) {
+            revert InvalidRecoup__NonWaterfallRecipientTrancheIndexTooLarge();
+        }
+        if (nonWaterfallRecipientAddress != address(0) && nonWaterfallRecipientTrancheIndex != tranchesLength) {
+            revert InvalidRecoup__NonWaterfallRecipientSetTwice();
         }
 
         uint256 i = 0;
-        for (; i < recipientsLength;) {
-            // TODO: better way to setup these checks?
+        for (; i < tranchesLength;) {
+            uint256 recipientsLength = tranches[i].recipients.length;
 
-            uint256 recipientsIndexLength = recipients[i].length;
-            if (recipientsIndexLength == 0) {
+            if (recipientsLength == 0) {
                 revert InvalidRecoup__TooFewAccounts(i);
             }
-            if (recipientsIndexLength != percentAllocations[i].length) {
+            if (recipientsLength != tranches[i].percentAllocations.length) {
                 revert InvalidRecoup__TrancheAccountsAndPercentAllocationsMismatch(i);
             }
-            if (recipientsIndexLength == 1 && percentAllocations[i][0] != PERCENTAGE_SCALE) {
-                revert InvalidRecoup__SingleAddressPercentAllocation(i, percentAllocations[i][0]);
+            if (recipientsLength == 1 && tranches[i].percentAllocations[0] != PERCENTAGE_SCALE) {
+                revert InvalidRecoup__SingleAddressPercentAllocation(i, tranches[i].percentAllocations[0]);
             }
             // Other recipient/percent allocation combos are splits and will get validated in the create split call
 
@@ -109,27 +125,35 @@ contract Recoup {
         }
 
         /// effects
-        address[] memory waterfallRecipients = new address[](recipientsLength);
+        address[] memory waterfallRecipients = new address[](tranchesLength);
 
         // Create splits
         i = 0;
-        for (; i < recipientsLength;) {
-            if (recipients[i].length == 1) {
-                waterfallRecipients[i] = recipients[i][0];
+        for (; i < tranchesLength;) {
+            if (tranches[i].recipients.length == 1) {
+                waterfallRecipients[i] = tranches[i].recipients[0];
             } else {
                 // Will fail if it's an immutable split that already exists. The caller
                 // should just pass in the split address (with percent = 100%) in that case
                 waterfallRecipients[i] = splitMain.createSplit({
-                    accounts: recipients[i],
-                    percentAllocations: percentAllocations[i],
-                    distributorFee: distributorFee,
-                    controller: address(0)
+                    accounts: tranches[i].recipients,
+                    percentAllocations: tranches[i].percentAllocations,
+                    distributorFee: tranches[i].distributorFee,
+                    controller: tranches[i].controller
                 });
             }
 
             unchecked {
                 ++i;
             }
+        }
+
+        // Set non-waterfall recipient
+        // If nonWaterfallRecipientAddress is set, that is used. If it's not set and a valid tranche index
+        // is set, the address at the tranche index is used. Otherwise, address(0) is used.
+        address nonWaterfallRecipient = nonWaterfallRecipientAddress;
+        if (nonWaterfallRecipientAddress == address(0) && nonWaterfallRecipientTrancheIndex < tranchesLength) {
+            nonWaterfallRecipient = waterfallRecipients[nonWaterfallRecipientTrancheIndex];
         }
 
         // Create waterfall
@@ -140,7 +164,6 @@ contract Recoup {
             thresholds: thresholds
         });
 
-        // TODO: should i include the created split addresses here too? Technically subgraph can look those up from the waterfall I think.
         emit CreateRecoup(address(wm));
     }
 }

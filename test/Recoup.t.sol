@@ -12,17 +12,23 @@ contract RecoupTest is Test {
     using LibSort for address[];
 
     event CreateRecoup(address waterfallModule);
+    event CreateWaterfallModule(
+        address indexed waterfallModule,
+        address token,
+        address nonWaterfallRecipient,
+        address[] recipients,
+        uint256[] thresholds
+    );
 
     uint256 constant BLOCK_NUMBER = 15684597;
 
     ISplitMain public splitMain;
     IWaterfallModuleFactory public waterfallModuleFactory;
 
-    uint32 public distributorFee;
-    address public nonWaterfallRecipient;
-    address[][] public recipients;
-    uint32[][] public percentAllocations;
-    uint256[] public thresholds;
+    address public nonWaterfallRecipientAddress;
+    uint256 public nonWaterfallRecipientTrancheIndex;
+    uint256 public tranchesLength;
+    uint256 public splitRecipientsLength;
 
     Recoup recoup;
 
@@ -33,10 +39,10 @@ contract RecoupTest is Test {
         splitMain = ISplitMain(0x2ed6c4B5dA6378c7897AC67Ba9e43102Feb694EE);
         waterfallModuleFactory = IWaterfallModuleFactory(0x4Df01754eBd055498C8087b1e9a5c7a9ad19b0F6);
 
-        nonWaterfallRecipient = makeAddr("nonWaterfallRecipient");
-        (recipients, percentAllocations, thresholds) = generateTranches(2, 2);
-
-        distributorFee = 2e4;
+        nonWaterfallRecipientAddress = makeAddr("nonWaterfallRecipient");
+        nonWaterfallRecipientTrancheIndex = 2;
+        tranchesLength = 2;
+        splitRecipientsLength = 2;
 
         recoup = new Recoup(address(splitMain), address(waterfallModuleFactory));
     }
@@ -46,72 +52,134 @@ contract RecoupTest is Test {
     /// -----------------------------------------------------------------------
 
     function testCan_createRecoupWithAllSplits() public {
+        // TODO: anyway to not repeat this in all the tests? Solidity complains if I assign to storage and then pass
+        // through as an arg. Some way to cast to memory before calling createRecoup maybe?
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
         recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
         );
     }
 
     function testCan_createRecoupWithAllSingleAddresses() public {
-        (recipients, percentAllocations, thresholds) = generateTranches(2, 1);
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) = generateTranches(tranchesLength, 1);
         recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
         );
     }
 
     function testCan_createRecoupWithSomeSplits() public {
-        recipients[1] = new address[](1);
-        recipients[1][0] = makeAddr("singleRecipient");
-        percentAllocations[1] = new uint32[](1);
-        percentAllocations[1][0] = 1e6;
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
+        tranches[1].recipients = new address[](1);
+        tranches[1].recipients[0] = makeAddr("singleRecipient");
+        tranches[1].percentAllocations = new uint32[](1);
+        tranches[1].percentAllocations[0] = 1e6;
+
         recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
         );
+    }
+
+    // TODO: distributor fee and controller tests?
+
+    function testCan_setNonWaterfallRecipientByAddress() public {
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) = generateTranches(2, 1);
+
+        vm.expectEmit(false, false, false, true);
+        address[] memory _waterfallEventAddresses = new address[](2);
+        _waterfallEventAddresses[0] = tranches[0].recipients[0];
+        _waterfallEventAddresses[1] = tranches[1].recipients[0];
+        emit CreateWaterfallModule(
+            address(0), address(0), nonWaterfallRecipientAddress, _waterfallEventAddresses, thresholds
+            );
+
+        recoup.createRecoup(
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
+        );
+    }
+
+    function testCan_setNonWaterfallRecipientByTrancheIndex() public {
+        address _nonWaterfallRecipient = makeAddr("nonWaterfallRecipientTrancheIndex");
+
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) = generateTranches(2, 1);
+        tranches[1].recipients[0] = _nonWaterfallRecipient;
+
+        vm.expectEmit(false, false, false, true);
+        address[] memory _waterfallEventAddresses = new address[](2);
+        _waterfallEventAddresses[0] = tranches[0].recipients[0];
+        _waterfallEventAddresses[1] = tranches[1].recipients[0];
+        emit CreateWaterfallModule(address(0), address(0), _nonWaterfallRecipient, _waterfallEventAddresses, thresholds);
+
+        recoup.createRecoup(address(0), address(0), 1, tranches, thresholds);
     }
 
     function testCan_emitOnCreate() public {
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
+
         vm.expectEmit(false, false, false, false);
         emit CreateRecoup(address(0xdead));
         recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
         );
     }
 
-    function testCannot_createWithMismatchedTrancheDataLengths() public {
-        recipients = generateTrancheRecipients(3, 2);
-        vm.expectRevert(Recoup.InvalidRecoup__RecipientsAndPercentAllocationsMismatch.selector);
-        recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+    function testCannot_createWithNonWaterfallRecipientIndexTooLarge() public {
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Recoup.InvalidRecoup__NonWaterfallRecipientTrancheIndexTooLarge.selector)
         );
+        recoup.createRecoup(address(0), nonWaterfallRecipientAddress, 3, tranches, thresholds);
+    }
+
+    function testCannot_createWithNonWaterfallRecipientSetTwice() public {
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
+
+        vm.expectRevert(abi.encodeWithSelector(Recoup.InvalidRecoup__NonWaterfallRecipientSetTwice.selector));
+        recoup.createRecoup(address(0), nonWaterfallRecipientAddress, 0, tranches, thresholds);
     }
 
     function testCannot_createWithMismatchedSplitDataLengths() public {
-        recipients[0] = new address[](1);
-        recipients[0][0] = makeAddr("recipient");
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
+
+        tranches[0].recipients = new address[](1);
+        tranches[0].recipients[0] = makeAddr("recipient");
         vm.expectRevert(
             abi.encodeWithSelector(Recoup.InvalidRecoup__TrancheAccountsAndPercentAllocationsMismatch.selector, 0)
         );
         recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
         );
     }
 
     function testCannot_createWithEmptyTrancheRecipients() public {
-        recipients[0] = new address[](0);
-        percentAllocations[0] = new uint32[](0);
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
+
+        tranches[0].recipients = new address[](0);
+        tranches[0].percentAllocations = new uint32[](0);
         vm.expectRevert(abi.encodeWithSelector(Recoup.InvalidRecoup__TooFewAccounts.selector, 0));
         recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
         );
     }
 
     function testCannot_createWithSingleAddressInvalidPercentAllocation() public {
-        recipients[0] = new address[](1);
-        recipients[0][0] = makeAddr("recipient");
-        percentAllocations[0] = new uint32[](1);
-        percentAllocations[0][0] = 1e5;
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) =
+            generateTranches(tranchesLength, splitRecipientsLength);
+
+        tranches[0].recipients = new address[](1);
+        tranches[0].recipients[0] = makeAddr("recipient");
+        tranches[0].percentAllocations = new uint32[](1);
+        tranches[0].percentAllocations[0] = 1e5;
         vm.expectRevert(abi.encodeWithSelector(Recoup.InvalidRecoup__SingleAddressPercentAllocation.selector, 0, 1e5));
         recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
+            address(0), nonWaterfallRecipientAddress, nonWaterfallRecipientTrancheIndex, tranches, thresholds
         );
     }
 
@@ -123,11 +191,9 @@ contract RecoupTest is Test {
         uint256 numTranches = bound(_numTranches, 2, 50);
         uint256 splitLength = bound(_splitLength, 1, 10);
 
-        (recipients, percentAllocations, thresholds) = generateTranches(numTranches, splitLength);
+        (Recoup.Tranche[] memory tranches, uint256[] memory thresholds) = generateTranches(numTranches, splitLength);
 
-        recoup.createRecoup(
-            address(0), nonWaterfallRecipient, distributorFee, recipients, percentAllocations, thresholds
-        );
+        recoup.createRecoup(address(0), nonWaterfallRecipientAddress, numTranches, tranches, thresholds);
     }
 
     /// -----------------------------------------------------------------------
@@ -137,46 +203,43 @@ contract RecoupTest is Test {
     function generateTranches(uint256 numTranches, uint256 splitLength)
         internal
         pure
-        returns (address[][] memory _recipients, uint32[][] memory _percentAllocations, uint256[] memory _thresholds)
+        returns (Recoup.Tranche[] memory _tranches, uint256[] memory _thresholds)
     {
-        _recipients = generateTrancheRecipients(numTranches, splitLength);
-        _percentAllocations = generateTranchePercentAllocations(numTranches, splitLength);
+        _tranches = new Recoup.Tranche[](numTranches);
+        for (uint256 i = 0; i < numTranches; i++) {
+            _tranches[i].recipients = generateTrancheRecipients(i, splitLength);
+            _tranches[i].percentAllocations = generateTranchePercentAllocations(splitLength);
+            _tranches[i].controller = address(0);
+            _tranches[i].distributorFee = 1e4;
+        }
         _thresholds = generateTrancheThresholds(numTranches - 1);
     }
 
-    function generateTrancheRecipients(uint256 numRecipients, uint256 splitLength)
+    function generateTrancheRecipients(uint256 trancheIndex, uint256 splitLength)
         internal
         pure
-        returns (address[][] memory _recipients)
+        returns (address[] memory _recipients)
     {
-        _recipients = new address[][](numRecipients);
-        for (uint256 i = 0; i < numRecipients; i++) {
-            address[] memory _currentRecipients = new address[](splitLength);
-            for (uint256 j = 0; j < splitLength; j++) {
-                _currentRecipients[j] = address(uint160((j + 1) * (i + 1)));
-            }
-            _currentRecipients.sort();
-            _currentRecipients.uniquifySorted();
-            _recipients[i] = _currentRecipients;
+        _recipients = new address[](splitLength);
+        for (uint256 i = 0; i < splitLength; i++) {
+            _recipients[i] = address(uint160((trancheIndex + 1) * (i + 1)));
         }
+        _recipients.sort();
+        _recipients.uniquifySorted();
     }
 
-    function generateTranchePercentAllocations(uint256 numAccounts, uint256 splitLength)
+    function generateTranchePercentAllocations(uint256 splitLength)
         internal
         pure
-        returns (uint32[][] memory allocations)
+        returns (uint32[] memory _allocations)
     {
-        allocations = new uint32[][](numAccounts);
-        for (uint256 i = 0; i < numAccounts; i++) {
-            uint256 _total = 0;
-            uint32[] memory _currentPercents = new uint32[](splitLength);
-            for (uint256 j = 0; j < splitLength; j++) {
-                _currentPercents[j] = uint32(1e6 / splitLength);
-                _total += _currentPercents[j];
-            }
-            _currentPercents[0] += uint32(1e6 - _total);
-            allocations[i] = _currentPercents;
+        uint256 _total = 0;
+        _allocations = new uint32[](splitLength);
+        for (uint256 i = 0; i < splitLength; i++) {
+            _allocations[i] = uint32(1e6 / splitLength);
+            _total += _allocations[i];
         }
+        _allocations[0] += uint32(1e6 - _total);
     }
 
     function generateTrancheThresholds(uint256 numThresholds) internal pure returns (uint256[] memory _thresholds) {
