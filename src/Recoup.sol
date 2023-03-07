@@ -150,7 +150,8 @@ contract Recoup {
 
         // Set non-waterfall recipient
         // If nonWaterfallRecipientAddress is set, that is used. If it's not set and a valid tranche index
-        // is set, the address at the tranche index is used. Otherwise, address(0) is used.
+        // is set, the address at the tranche index is used. Otherwise, address(0) is used which means
+        // that non-waterfall tokens can be recovered to any tranche recipient address.
         address nonWaterfallRecipient = nonWaterfallRecipientAddress;
         if (nonWaterfallRecipientAddress == address(0) && nonWaterfallRecipientTrancheIndex < tranchesLength) {
             nonWaterfallRecipient = waterfallRecipients[nonWaterfallRecipientTrancheIndex];
