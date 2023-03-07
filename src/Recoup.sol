@@ -130,16 +130,17 @@ contract Recoup {
         // Create splits
         i = 0;
         for (; i < tranchesLength;) {
-            if (tranches[i].recipients.length == 1) {
-                waterfallRecipients[i] = tranches[i].recipients[0];
+            Tranche calldata t = tranches[i];
+            if (t.recipients.length == 1) {
+                waterfallRecipients[i] = t.recipients[0];
             } else {
                 // Will fail if it's an immutable split that already exists. The caller
                 // should just pass in the split address (with percent = 100%) in that case
                 waterfallRecipients[i] = splitMain.createSplit({
-                    accounts: tranches[i].recipients,
-                    percentAllocations: tranches[i].percentAllocations,
-                    distributorFee: tranches[i].distributorFee,
-                    controller: tranches[i].controller
+                    accounts: t.recipients,
+                    percentAllocations: t.percentAllocations,
+                    distributorFee: t.distributorFee,
+                    controller: t.controller
                 });
             }
 
