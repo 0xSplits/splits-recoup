@@ -55,7 +55,6 @@ contract Recoup {
     IWaterfallModuleFactory public immutable waterfallModuleFactory;
 
     uint256 public constant PERCENTAGE_SCALE = 1e6;
-    // uint256 internal constant MAX_DISTRIBUTOR_FEE = 1e5;
 
     /// -----------------------------------------------------------------------
     /// constructor
